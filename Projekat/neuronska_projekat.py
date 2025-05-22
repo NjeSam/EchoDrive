@@ -92,7 +92,7 @@ def process_all_files():
     return np.array(features), np.array(labels)
 
 class SimpleCNN:
-    def __init__(self, input_shape, num_classes, lr=0.001):
+    def __init__(self, input_shape, num_classes, lr=0.01):
         self.lr = lr
         self.lr_decay = 0.95
         self.num_classes = num_classes
