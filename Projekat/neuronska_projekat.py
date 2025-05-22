@@ -5,15 +5,15 @@ import librosa.display
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-# Konfiguracija
+# Configuration
 WAV_DIR = 'wav_commands'
 SPECTROGRAM_DIR = 'spectrograms'
 SAMPLE_RATE = 22050
 N_MELS = 128
 HOP_LENGTH = 512
-DURATION = 2  # u sekundama
+DURATION = 3  # seconds
 
-# Mapa komandi
+# Command mapping
 command_mapping = {
     'AI ON': 0,
     'AI OFF': 1,
@@ -29,7 +29,7 @@ command_mapping = {
     'TURN OFF THE NAVIGATION': 11
 }
 
-# Kreiraj izlazne foldere
+# Create output directories
 os.makedirs(SPECTROGRAM_DIR, exist_ok=True)
 for cmd in command_mapping:
     os.makedirs(os.path.join(SPECTROGRAM_DIR, cmd.replace(' ', '_')), exist_ok=True)
@@ -53,14 +53,12 @@ def create_spectrogram(audio_path, save_path=None, show=False):
 
     if save_path:
         np.save(save_path, norm_S)
-        if not os.path.exists(save_path):
-            print(f"❌ Greška pri snimanju: {save_path}")
 
     if show:
         plt.figure(figsize=(10, 4))
         librosa.display.specshow(log_S, sr=sr, hop_length=HOP_LENGTH, x_axis='time', y_axis='mel')
         plt.colorbar(format='%+2.0f dB')
-        plt.title(f'Spektrogram: {os.path.basename(audio_path)}')
+        plt.title(f'Spectrogram: {os.path.basename(audio_path)}')
         plt.tight_layout()
         plt.show()
 
@@ -71,11 +69,10 @@ def process_all_files():
     skipped_files = []
 
     for root, _, files in os.walk(WAV_DIR):
-        for filename in tqdm(files, desc="Obrada fajlova"):
+        for filename in tqdm(files, desc="Processing files"):
             if filename.endswith('.wav'):
                 cmd = extract_command(filename)
                 if cmd is None:
-                    print(f"Preskočen fajl: {filename}")
                     skipped_files.append(filename)
                     continue
 
@@ -94,55 +91,40 @@ def process_all_files():
 
     return np.array(features), np.array(labels)
 
-def load_spectrograms():
-    features, labels = [], []
-    for cmd, label in command_mapping.items():
-        cmd_dir = os.path.join(SPECTROGRAM_DIR, cmd.replace(' ', '_'))
-        if not os.path.exists(cmd_dir):
-            continue
-        for file in os.listdir(cmd_dir):
-            if file.endswith('.npy'):
-                path = os.path.join(cmd_dir, file)
-                spectrogram = np.load(path)
-                features.append(spectrogram)
-                labels.append(label)
-    return np.array(features), np.array(labels)
-
-def spectrogram_files_exist():
-    for cmd in command_mapping:
-        cmd_folder = os.path.join(SPECTROGRAM_DIR, cmd.replace(' ', '_'))
-        if os.path.exists(cmd_folder):
-            if any(f.endswith('.npy') for f in os.listdir(cmd_folder)):
-                return True
-    return False
-
-# MLP implementacija u NumPy-u
 class SimpleCNN:
-    def __init__(self, input_shape, num_classes, lr=0.01):
+    def __init__(self, input_shape, num_classes, lr=0.001):
         self.lr = lr
+        self.lr_decay = 0.95
         self.num_classes = num_classes
-        self.input_shape = input_shape  # (1, H, W)
+        self.input_shape = input_shape  # Should be (1, height, width)
+        self.dropout_rate = 0.2
 
-        # Konvolucioni sloj 1
+        # Conv Layer 1
         self.k1 = np.random.randn(8, 1, 3, 3) * np.sqrt(2 / 9)
         self.b1 = np.zeros((8, 1))
 
-        # Konvolucioni sloj 2
+        # Conv Layer 2
         self.k2 = np.random.randn(16, 8, 3, 3) * np.sqrt(2 / (8 * 9))
         self.b2 = np.zeros((16, 1))
 
-        # Dimenzije posle konvolucije i pooling-a (računa se kasnije)
-        self.fc_input_size = None
+        # Calculate the flattened size
+        self._calculate_fc_input_size()
 
-        # Potpuno povezani sloj (inicijalizuje se nakon prve propagacije)
-        self.fc_w = None
-        self.fc_b = None
+    def _calculate_fc_input_size(self):
+        # Mock forward pass to calculate flattened size
+        x = np.zeros((1, *self.input_shape))
+        x = self.conv2d(x, self.k1, self.b1)
+        x = self.max_pool(x)
+        x = self.conv2d(x, self.k2, self.b2)
+        x = self.max_pool(x)
+        self.fc_input_size = x.reshape(-1).shape[0]
+        
+        # Initialize FC layer
+        self.fc_w = np.random.randn(self.fc_input_size, self.num_classes) * np.sqrt(2 / self.fc_input_size)
+        self.fc_b = np.zeros((1, self.num_classes))
 
     def relu(self, x):
         return np.maximum(0, x)
-
-    def relu_deriv(self, x):
-        return (x > 0).astype(float)
 
     def softmax(self, x):
         e = np.exp(x - np.max(x, axis=1, keepdims=True))
@@ -173,18 +155,21 @@ class SimpleCNN:
                     out[c, i, j] = np.max(x[c, i*size:(i+1)*size, j*size:(j+1)*size])
         return out
 
-    def forward(self, x):
+    def forward(self, x, training=True):
         self.conv1 = self.conv2d(x, self.k1, self.b1)
         self.act1 = self.relu(self.conv1)
+        if training:
+            self.act1 *= (1 - self.dropout_rate)  # Dropout
         self.pool1 = self.max_pool(self.act1)
 
         self.conv2 = self.conv2d(self.pool1, self.k2, self.b2)
         self.act2 = self.relu(self.conv2)
+        if training:
+            self.act2 *= (1 - self.dropout_rate)  # Dropout
         self.pool2 = self.max_pool(self.act2)
 
         self.flat = self.pool2.reshape(-1)
 
-        # Inicijalizuj FC sloj tek sada ako nije
         if self.fc_w is None:
             self.fc_input_size = self.flat.shape[0]
             self.fc_w = np.random.randn(self.fc_input_size, self.num_classes) * np.sqrt(2 / self.fc_input_size)
@@ -195,85 +180,131 @@ class SimpleCNN:
         return self.probs
 
     def backward(self, x, y_true):
-        y_true_onehot = np.zeros_like(self.probs)
-        y_true_onehot[0, y_true] = 1
-        dlogits = self.probs - y_true_onehot  # shape: (1, num_classes)
+        # Label smoothing
+        y_true_onehot = np.full((1, self.num_classes), 0.1 / (self.num_classes - 1))
+        y_true_onehot[0, y_true] = 0.9
+
+        dlogits = self.probs - y_true_onehot
 
         dW = self.flat.reshape(-1, 1) @ dlogits
         db = dlogits
+
+        # Gradient clipping
+        dW = np.clip(dW, -1.0, 1.0)
+        db = np.clip(db, -1.0, 1.0)
 
         self.fc_w -= self.lr * dW
         self.fc_b -= self.lr * db
 
     def train(self, X, y, epochs=10):
+        print("[INFO] Starting CNN training")
         for epoch in range(epochs):
             correct = 0
             total_loss = 0
+            print(f"\n[INFO] --- Epoch {epoch+1}/{epochs} ---")
+            
             for i in range(len(X)):
                 probs = self.forward(X[i])
                 pred = np.argmax(probs)
-                loss = -np.log(probs[0, y[i]] + 1e-8)
+                
+                # Stable loss calculation
+                probs_clipped = np.clip(probs, 1e-10, 1.0 - 1e-10)
+                loss = -np.log(probs_clipped[0, y[i]])
                 total_loss += loss
+                
                 correct += int(pred == y[i])
                 self.backward(X[i], y[i])
+                
+                if i % 10 == 0:
+                    print(f"[DEBUG] Sample {i}: Loss={loss:.4f}, Pred={pred}, True={y[i]}")
+            
+            # Learning rate decay
+            self.lr *= self.lr_decay
+            
             acc = correct / len(X)
-            print(f"Epoch {epoch+1}: Loss={total_loss/len(X):.4f}, Accuracy={acc:.4f}")
+            avg_loss = total_loss / len(X)
+            print(f"[RESULT] Epoch {epoch+1}: Loss={avg_loss:.4f}, Accuracy={acc:.4f}")
+            print(f"[INFO] New learning rate: {self.lr:.6f}")
 
+    def save(self, path='cnn_weights.npz'):
+        np.savez(path,
+                k1=self.k1, b1=self.b1,
+                k2=self.k2, b2=self.b2,
+                fc_w=self.fc_w, fc_b=self.fc_b)
+
+    def load(self, path='cnn_weights.npz'):
+        data = np.load(path)
+        self.k1 = data['k1']
+        self.b1 = data['b1']
+        self.k2 = data['k2']
+        self.b2 = data['b2']
+        self.fc_w = data['fc_w']
+        self.fc_b = data['fc_b']
+
+    
     def predict(self, x):
-        probs = self.forward(x)
+        """Added predict method that wraps forward pass"""
+        probs = self.forward(x, training=False)  # Set training=False for prediction
         return np.argmax(probs)
-
 
 def predict_wav_with_cnn(wav_file):
     spectrogram = create_spectrogram(wav_file)
-    x_input = spectrogram[np.newaxis, np.newaxis, :, :]  # (1, 1, H, W)
-    cnn = SimpleCNN(input_shape=(1, spectrogram.shape[0], spectrogram.shape[1]), num_classes=len(command_mapping))
+    
+    # Ensure the spectrogram has expected dimensions
+    expected_height = 128  # Should match N_MELS
+    expected_width = int((SAMPLE_RATE * DURATION) / HOP_LENGTH) + 1
+    
+    if spectrogram.shape != (expected_height, expected_width):
+        # Resize if necessary
+        from scipy.ndimage import zoom
+        zoom_factors = (expected_height/spectrogram.shape[0], 
+                       expected_width/spectrogram.shape[1])
+        spectrogram = zoom(spectrogram, zoom_factors)
+    
+    x_input = spectrogram[np.newaxis, np.newaxis, :, :]  # Add batch and channel dims
+    
+    cnn = SimpleCNN(input_shape=(expected_height, expected_width), 
+                   num_classes=len(command_mapping))
     cnn.load('cnn_weights.npz')
     pred_idx = cnn.predict(x_input[0])
     reverse_mapping = {v: k for k, v in command_mapping.items()}
-    print(f"\n🎧 Predikcija: {reverse_mapping[pred_idx]}")
-def save(self, path='cnn_weights.npz'):
-    np.savez(path, fc_w=self.fc_w, fc_b=self.fc_b)
-
-def load(self, path='cnn_weights.npz'):
-    data = np.load(path)
-    self.fc_w = data['fc_w']
-    self.fc_b = data['fc_b']
-
-
-
+    print(f"\n🎧 Prediction: {reverse_mapping[pred_idx]}")
 if __name__ == "__main__":
-    print("\n🎤 Glasovna komanda – MLP klasifikator")
-    print("1. Trenira model")
-    print("2. Testira fajl 'untitled.wav'")
-    choice = input("\n👉 Unesi izbor (1 ili 2): ").strip()
+    print("\n🎤 Voice Command CNN Classifier")
+    print("1. Train model")
+    print("2. Test 'untitled.wav'")
+    choice = input("\n👉 Enter choice (1 or 2): ").strip()
 
     if choice == "1":
-        print("\n🚀 Početak obrade podataka...")
-
-        if spectrogram_files_exist():
-            print("\n📥 Učitavam postojeće spektrograme...")
-            X, y = load_spectrograms()
-        else:
-            print("\n🔄 Kreiram nove spektrograme...")
-            X, y = process_all_files()
-
-        if len(X) == 0:
-            print("\n❌ KRITIČNA GREŠKA: Nema obrađenih podataka!")
-        else:
-            X_reshaped = X[:, np.newaxis, :, :]  # Dodaj kanal: (N, 1, H, W)
-            cnn = SimpleCNN(input_shape=(1, X.shape[1], X.shape[2]), num_classes=len(command_mapping), lr=0.01)
-            cnn.train(X_reshaped, y, epochs=10)
-
-
-            print("\n💾 Model sačuvan u 'mlp_weights.npz'")
+        print("\n🚀 Starting model training...")
+        X, y = process_all_files()
+        
+        # Calculate expected dimensions
+        expected_height = N_MELS
+        expected_width = int((SAMPLE_RATE * DURATION) / HOP_LENGTH) + 1
+        
+        # Resize all spectrograms to expected dimensions
+        from scipy.ndimage import zoom
+        X_reshaped = []
+        for spec in X:
+            if spec.shape != (expected_height, expected_width):
+                zoom_factors = (expected_height/spec.shape[0], expected_width/spec.shape[1])
+                spec = zoom(spec, zoom_factors)
+            X_reshaped.append(spec[np.newaxis, :, :])  # Add channel dim
+        
+        X_reshaped = np.array(X_reshaped)
+    
+        cnn = SimpleCNN(input_shape=(expected_height, expected_width), 
+                       num_classes=len(command_mapping))
+        cnn.train(X_reshaped, y, epochs=10)
+        cnn.save('cnn_weights.npz')
+        print("\n💾 Model saved to 'cnn_weights.npz'")
 
     elif choice == "2":
         test_file = "untitled.wav"
         if os.path.exists(test_file):
-            print(f"\n🔍 Testiram fajl: {test_file}")
             predict_wav_with_cnn(test_file)
         else:
-            print(f"\n❗ Test fajl '{test_file}' nije pronađen u trenutnom folderu.")
+            print(f"[ERROR] File '{test_file}' not found.")
     else:
-        print("\n❗ Nevažeći unos. Pokreni program ponovo i unesi 1 ili 2.")
+        print("[ERROR] Invalid choice. Enter 1 or 2.")
