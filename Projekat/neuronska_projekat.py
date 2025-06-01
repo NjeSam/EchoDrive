@@ -1,3 +1,4 @@
+# Kompletna verzija sa augmentacijom i fiksiranjem duzine zvuka
 import os
 import numpy as np
 import librosa
@@ -6,51 +7,28 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+from tensorflow.keras.regularizers import l2
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from scipy.ndimage import zoom
+import random
 
-# Configuration
 WAV_DIR = 'wav_commands'
 SPECTROGRAM_DIR = 'spectrograms'
 SAMPLE_RATE = 22050
 N_MELS = 128
 HOP_LENGTH = 512
-DURATION = 3  # seconds
+DURATION = 3  # sekunde
 
-# Command mapping
 command_mapping = {
-    'AI ON': 0,
-    'AI OFF': 1,
-    'TURN ON THE AIR CONDITIONER': 2,
-    'TURN OFF THE AIR CONDITIONER': 3,
-    'TURN ON THE RADIO': 4,
-    'TURN OFF THE RADIO': 5,
-    'SWITCH THE RADIO STATION': 6,
-    'MUTE THE RADIO': 7,
-    'TURN UP THE VOLUME': 8,
-    'TURN DOWN THE VOLUME': 9,
-    'TURN ON THE NAVIGATION': 10,
-    'TURN OFF THE NAVIGATION': 11
+    'AI ON': 0, 'AI OFF': 1, 'TURN ON THE AIR CONDITIONER': 2, 'TURN OFF THE AIR CONDITIONER': 3,
+    'TURN ON THE RADIO': 4, 'TURN OFF THE RADIO': 5, 'SWITCH THE RADIO STATION': 6,
+    'MUTE THE RADIO': 7, 'TURN UP THE VOLUME': 8, 'TURN DOWN THE VOLUME': 9,
+    'TURN ON THE NAVIGATION': 10, 'TURN OFF THE NAVIGATION': 11
 }
 
-# Custom class weights
-class_weight = {
-    0: 1.0,  # AI ON
-    1: 1.0,  # AI OFF
-    2: 1.0,  # TURN ON THE AIR CONDITIONER
-    3: 1.0,  # TURN OFF THE AIR CONDITIONER
-    4: 1.0,  # TURN ON THE RADIO
-    5: 1.0,  # TURN OFF THE RADIO
-    6: 1.0,  # SWITCH THE RADIO STATION
-    7: 1.0,  # MUTE THE RADIO
-    8: 1.0,  # TURN UP THE VOLUME
-    9: 1.0,  # TURN DOWN THE VOLUME
-    10: 1.0, # TURN ON THE NAVIGATION
-    11: 1.0  # TURN OFF THE NAVIGATION
-}
-
-# Create output directories
 os.makedirs(SPECTROGRAM_DIR, exist_ok=True)
 for cmd in command_mapping:
     os.makedirs(os.path.join(SPECTROGRAM_DIR, cmd.replace(' ', '_')), exist_ok=True)
@@ -62,135 +40,121 @@ def extract_command(filename):
             return cmd
     return None
 
-def create_spectrogram(audio_path, save_path=None, show=False):
-    y, sr = librosa.load(audio_path, sr=SAMPLE_RATE, duration=DURATION)
-    if len(y) < SAMPLE_RATE * DURATION:
-        y = np.pad(y, (0, SAMPLE_RATE * DURATION - len(y)), mode='constant')
+def augment_audio(y, sr):
+    aug = []
+    aug.append(librosa.effects.pitch_shift(y=y, sr=sr, n_steps=random.uniform(-1.5, 1.5)))
+    aug.append(librosa.effects.time_stretch(y, rate=random.uniform(0.85, 1.15)))
+    noise = np.random.normal(0, 0.005, y.shape)
+    aug.append(y + noise)
+    return aug
 
+def create_spectrogram(y, sr):
     S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=N_MELS, hop_length=HOP_LENGTH)
     log_S = librosa.power_to_db(S, ref=np.max)
     norm_S = (log_S - log_S.min()) / (log_S.max() - log_S.min())
-
-    if save_path:
-        np.save(save_path, norm_S)
-
-    if show:
-        plt.figure(figsize=(10, 4))
-        librosa.display.specshow(log_S, sr=sr, hop_length=HOP_LENGTH, x_axis='time', y_axis='mel')
-        plt.colorbar(format='%+2.0f dB')
-        plt.title(f'Spectrogram: {os.path.basename(audio_path)}')
-        plt.tight_layout()
-        plt.show()
-
     return norm_S
 
 def process_all_files():
     features, labels = [], []
+    expected_shape = (N_MELS, int((SAMPLE_RATE * DURATION) / HOP_LENGTH) + 1)
+    target_len = SAMPLE_RATE * DURATION
+
     for root, _, files in os.walk(WAV_DIR):
         for filename in tqdm(files, desc="Processing files"):
-            if filename.endswith('.wav'):
-                cmd = extract_command(filename)
-                if cmd is None:
-                    continue
-                wav_path = os.path.join(root, filename)
-                cmd_folder = cmd.replace(' ', '_')
-                spec_filename = filename.replace('.wav', '.npy')
-                spec_path = os.path.join(SPECTROGRAM_DIR, cmd_folder, spec_filename)
+            if not filename.endswith('.wav'): continue
+            cmd = extract_command(filename)
+            if cmd is None: continue
 
-                if os.path.exists(spec_path):
-                    spectrogram = np.load(spec_path)
-                else:
-                    spectrogram = create_spectrogram(wav_path, save_path=spec_path)
+            wav_path = os.path.join(root, filename)
+            y, sr = librosa.load(wav_path, sr=SAMPLE_RATE)
 
-                features.append(spectrogram)
+            all_versions = [y] + augment_audio(y, sr)
+            for y_aug in all_versions:
+                # Trimuj/paduj na tačno 3 sekunde
+                if len(y_aug) > target_len:
+                    y_aug = y_aug[:target_len]
+                elif len(y_aug) < target_len:
+                    y_aug = np.pad(y_aug, (0, target_len - len(y_aug)))
+
+                spec = create_spectrogram(y_aug, sr)
+                if spec.shape != expected_shape:
+                    zoom_factors = (expected_shape[0] / spec.shape[0], expected_shape[1] / spec.shape[1])
+                    spec = zoom(spec, zoom_factors)
+                features.append(spec)
                 labels.append(command_mapping[cmd])
 
-    return np.array(features), np.array(labels)
+    features = np.array(features)[..., np.newaxis]
+    labels = np.array(labels)
+    return features, labels
 
 def build_model(input_shape, num_classes):
     model = Sequential()
-    model.add(Conv2D(16, (3, 3), activation='relu', input_shape=input_shape))
+    model.add(Conv2D(32, (3, 3), activation='relu', kernel_regularizer=l2(1e-4), input_shape=input_shape))
+    model.add(BatchNormalization())
     model.add(MaxPooling2D((2, 2)))
-    model.add(Dropout(0.2))
+    model.add(Dropout(0.3))
 
-    model.add(Conv2D(32, (3, 3), activation='relu'))
+    model.add(Conv2D(64, (3, 3), activation='relu', kernel_regularizer=l2(1e-4)))
+    model.add(BatchNormalization())
     model.add(MaxPooling2D((2, 2)))
-    model.add(Dropout(0.2))
+    model.add(Dropout(0.3))
 
-    model.add(Conv2D(64, (3, 3), activation='relu'))
+    model.add(Conv2D(128, (3, 3), activation='relu', kernel_regularizer=l2(1e-4)))
+    model.add(BatchNormalization())
     model.add(MaxPooling2D((2, 2)))
-    model.add(Dropout(0.2))
-    
-    # New additional convolutional layer
-    model.add(Conv2D(128, (3, 3), activation='relu'))
-    model.add(MaxPooling2D((2, 2)))
-    model.add(Dropout(0.2))
+    model.add(Dropout(0.4))
 
     model.add(Flatten())
-    model.add(Dense(128, activation='relu'))
-    model.add(Dropout(0.3))
+    model.add(Dense(128, activation='relu', kernel_regularizer=l2(1e-4)))
+    model.add(Dropout(0.4))
     model.add(Dense(num_classes, activation='softmax'))
 
-    model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer=Adam(learning_rate=1e-4), loss='categorical_crossentropy', metrics=['accuracy'])
     return model
 
-def predict_wav_with_model(wav_file, model_path='keras_model.h5'):
-    spectrogram = create_spectrogram(wav_file)
-
-    expected_height = 128
-    expected_width = int((SAMPLE_RATE * DURATION) / HOP_LENGTH) + 1
-    if spectrogram.shape != (expected_height, expected_width):
-        from scipy.ndimage import zoom
-        zoom_factors = (expected_height/spectrogram.shape[0], expected_width/spectrogram.shape[1])
-        spectrogram = zoom(spectrogram, zoom_factors)
-
-    x_input = spectrogram[np.newaxis, ..., np.newaxis]
-    model = load_model(model_path)
-    pred_idx = np.argmax(model.predict(x_input))
-    reverse_mapping = {v: k for k, v in command_mapping.items()}
-    print(f"\n\U0001F3A7 Prediction: {reverse_mapping[pred_idx]}")
+def plot_training_history(history):
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['accuracy'], label='Train Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Model Accuracy'); plt.xlabel('Epoch'); plt.ylabel('Accuracy'); plt.legend()
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Model Loss'); plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.legend()
+    plt.tight_layout(); plt.savefig('training_metrics.png'); plt.show()
 
 if __name__ == "__main__":
-    print("\n\U0001F3A4 Voice Command Classifier (Keras)")
-    print("1. Train model")
-    print("2. Test 'untitled.wav'")
-    choice = input("\n\U0001F449 Enter choice (1 or 2): ").strip()
-
-    if choice == "1":
-        print("\n\U0001F680 Starting model training...")
+    print("Opcije:\n1 - Trenutni trening\n2 - Samo predikcija (untitled.wav)")
+    izbor = input("Unesi 1 ili 2: ").strip()
+    if izbor == "1":
         X, y = process_all_files()
+        y_cat = to_categorical(y, num_classes=len(command_mapping))
+        X_train, X_test, y_train, y_test = train_test_split(X, y_cat, test_size=0.2, stratify=y, random_state=42)
 
-        expected_height = N_MELS
-        expected_width = int((SAMPLE_RATE * DURATION) / HOP_LENGTH) + 1
-
-        from scipy.ndimage import zoom
-        X_resized = []
-        for spec in X:
-            if spec.shape != (expected_height, expected_width):
-                zoom_factors = (expected_height/spec.shape[0], expected_width/spec.shape[1])
-                spec = zoom(spec, zoom_factors)
-            X_resized.append(spec[..., np.newaxis])
-        X_resized = np.array(X_resized)
-
-        y_indices = y  # bez one-hot enkodovanja
-
-        X_train, X_test, y_train, y_test = train_test_split(X_resized, y_indices, test_size=0.2, random_state=42, stratify=y_indices)
-
-        model = build_model(input_shape=(expected_height, expected_width, 1), num_classes=len(command_mapping))
-        model.fit(X_train, to_categorical(y_train),
-                  epochs=100,
-                  batch_size=8,
-                  validation_data=(X_test, to_categorical(y_test)),
-                  class_weight=class_weight)
-
+        model = build_model(X.shape[1:], len(command_mapping))
+        early_stop = EarlyStopping(patience=10, restore_best_weights=True)
+        reduce_lr = ReduceLROnPlateau(patience=5, factor=0.5, verbose=1)
+        history = model.fit(X_train, y_train, epochs=100, batch_size=16, validation_data=(X_test, y_test),
+                            callbacks=[early_stop, reduce_lr])
         model.save("keras_model.h5")
-        print("\n📀 Model saved to 'keras_model.h5'")
+        plot_training_history(history)
+        print("\n✅ Model sačuvan kao 'keras_model.h5'.")
 
-    elif choice == "2":
-        test_file = "untitled.wav"
-        if os.path.exists(test_file):
-            predict_wav_with_model(test_file)
+    elif izbor == "2":
+        if not os.path.exists("AI OFF.wav"):
+            print("❌ Nema fajla 'untitled.wav'.")
         else:
-            print(f"[ERROR] File '{test_file}' not found.")
-    else:
-        print("[ERROR] Invalid choice. Enter 1 or 2.")
+            y, sr = librosa.load("AI OFF.wav", sr=SAMPLE_RATE, duration=DURATION)
+            if len(y) < SAMPLE_RATE * DURATION:
+                y = np.pad(y, (0, SAMPLE_RATE * DURATION - len(y)))
+            spec = create_spectrogram(y, sr)
+            expected_shape = (N_MELS, int((SAMPLE_RATE * DURATION) / HOP_LENGTH) + 1)
+            if spec.shape != expected_shape:
+                zoom_factors = (expected_shape[0] / spec.shape[0], expected_shape[1] / spec.shape[1])
+                spec = zoom(spec, zoom_factors)
+            x_input = spec[np.newaxis, ..., np.newaxis]
+            model = load_model("keras_model.h5")
+            pred = np.argmax(model.predict(x_input))
+            inv_map = {v: k for k, v in command_mapping.items()}
+            print(f"🎧 Prepoznata komanda: {inv_map[pred]}")
