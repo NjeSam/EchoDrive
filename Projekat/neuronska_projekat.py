@@ -120,6 +120,11 @@ def build_model(input_shape, num_classes):
     model.add(Conv2D(64, (3, 3), activation='relu'))
     model.add(MaxPooling2D((2, 2)))
     model.add(Dropout(0.2))
+    
+    # New additional convolutional layer
+    model.add(Conv2D(128, (3, 3), activation='relu'))
+    model.add(MaxPooling2D((2, 2)))
+    model.add(Dropout(0.2))
 
     model.add(Flatten())
     model.add(Dense(128, activation='relu'))
@@ -188,4 +193,4 @@ if __name__ == "__main__":
         else:
             print(f"[ERROR] File '{test_file}' not found.")
     else:
-        print("[ERROR] Invalid choice. Enter 1 or 2.") 
+        print("[ERROR] Invalid choice. Enter 1 or 2.")
