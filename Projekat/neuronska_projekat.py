@@ -14,6 +14,9 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from scipy.ndimage import zoom
 import random
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+
 
 WAV_DIR = 'wav_commands'
 SPECTROGRAM_DIR = 'spectrograms'
@@ -124,7 +127,45 @@ def plot_training_history(history):
     plt.title('Model Loss'); plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.legend()
     plt.tight_layout(); plt.savefig('training_metrics.png'); plt.show()
 
+
+def play_music():
+    sp.start_playback()
+    print("▶️ Glasba se predvaja.")
+
+def pause_music():
+    sp.pause_playback()
+    print("⏸️ Glasba je na pavzi.")
+
+def next_track():
+    sp.next_track()
+    print("⏭️ Naslednja pesem.")
+
+
+def volume_up():
+    current = sp.current_playback()
+    if current and 'device' in current:
+        current_volume = current['device']['volume_percent']
+        sp.volume(min(100, current_volume + 10))
+        print(f"🔊 Glasnost zvišana na {min(100, current_volume + 10)}%.")
+
+def volume_down():
+    current = sp.current_playback()
+    if current and 'device' in current:
+        current_volume = current['device']['volume_percent']
+        sp.volume(max(0, current_volume - 10))
+        print(f"🔉 Glasnost zmanjšana na {max(0, current_volume - 10)}%.")
+
+
 if __name__ == "__main__":
+
+    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+    client_id="d5b6a52f2b1b47288972ddf296b46ccd",
+    client_secret="b68ef098e4b1457d9fac6d5a79ec4ce7",
+    redirect_uri="http://127.0.0.1:8000/callback",
+    scope="user-modify-playback-state user-read-playback-state"
+    ))
+
+
     print("Opcije:\n1 - Trenutni trening\n2 - Samo predikcija (untitled.wav)")
     izbor = input("Unesi 1 ili 2: ").strip()
     if izbor == "1":
@@ -145,7 +186,7 @@ if __name__ == "__main__":
         if not os.path.exists("AI OFF.wav"):
             print("❌ Nema fajla 'untitled.wav'.")
         else:
-            y, sr = librosa.load("AI OFF.wav", sr=SAMPLE_RATE, duration=DURATION)
+            y, sr = librosa.load("TURN OFF THE RADIO LAN D 4.wav", sr=SAMPLE_RATE, duration=DURATION)
             if len(y) < SAMPLE_RATE * DURATION:
                 y = np.pad(y, (0, SAMPLE_RATE * DURATION - len(y)))
             spec = create_spectrogram(y, sr)
@@ -157,4 +198,17 @@ if __name__ == "__main__":
             model = load_model("keras_model.h5")
             pred = np.argmax(model.predict(x_input))
             inv_map = {v: k for k, v in command_mapping.items()}
-            print(f"🎧 Prepoznata komanda: {inv_map[pred]}")
+            recognized_cmd = inv_map[pred]
+            print(f"🎧 Prepoznata komanda: {recognized_cmd}")
+            
+
+            if recognized_cmd == "TURN ON THE RADIO":
+                play_music()
+            if recognized_cmd == "TURN OFF THE RADIO":
+                pause_music()
+            if recognized_cmd == "SWITCH THE RADIO STATION":
+                next_track()
+            if recognized_cmd == "TURN DOWN THE VOLUME":
+                volume_down()
+            if recognized_cmd == "TURN UP THE VOLUME":
+                volume_up()
