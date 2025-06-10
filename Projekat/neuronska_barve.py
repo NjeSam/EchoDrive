@@ -14,7 +14,7 @@ SAMPLE_RATE = 22050
 DURATION = 3
 N_MELS = 128
 HOP_LENGTH = 512
-CONFIDENCE_THRESHOLD = 0.6
+CONFIDENCE_THRESHOLD = 0.9
 MARGIN_THRESHOLD = 0.2
 LABELS = ['DJORDJE', 'LAN', 'NJEGOS']
 LABEL_TO_INDEX = {name: i for i, name in enumerate(LABELS)}
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     if izbor == "1":
         train_model()
     elif izbor == "2":
-        test_path = os.path.join(WAV_DIR, "AI OFF LUKA.wav")
+        test_path = os.path.join(WAV_DIR, "TURN OFF THE RADIO LAN D 4.wav")
         if os.path.exists(test_path):
             predict_speaker(test_path)
         else:
