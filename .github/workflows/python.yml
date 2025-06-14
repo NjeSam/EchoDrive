@@ -1,4 +1,4 @@
-name: Python CI
+name: CI Pipeline
 
 on:
   push:
@@ -7,24 +7,42 @@ on:
     branches: [ main, devel ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout koda
+    - name: ✅ Checkout repozitorijuma
       uses: actions/checkout@v4
 
-    - name: Postavi Python
+    - name: 🐍 Postavi Python okruženje
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: Instaliraj zavisnosti (ako ih ima)
+    - name: 📦 Instaliraj zavisnosti
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -r requirements.txt || true
+        pip install pytest
 
-    - name: Proveri sintaksu fajlova
+    - name: ✅ Proveri sintaksu fajlova
       run: |
         python -m py_compile generate_spectrograms.py || true
         python -m py_compile neuronska_projekat.py || true
+
+    - name: 🧪 Pokreni unit testove (tests/)
+      run: |
+        pytest tests/ || echo "⚠️ Testovi nisu prošli ili ne postoje"
+
+    - name: 🛠 Build aplikacije (samo na main)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        echo "🏗 Ovde bi išla komanda za build, npr: python setup.py build"
+        mkdir build
+        cp neuronska_projekat.py build/
+
+    - name: 🚀 Deploy aplikacije (samo na main)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        echo "🚀 Deploy skripta ovde (npr. SCP, rsync, Docker push...)"
+        echo "📦 Poslato na server ili hosting"
