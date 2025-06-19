@@ -37,11 +37,10 @@ jobs:
           pytest tests/ || echo "⚠️ Testi niso uspeli ali ne obstajajo"
 
       - name: 🛠 Gradnja aplikacije (samo na main veji)
-        if: github.ref == 'refs/heads/main'
         run: |
           echo "🏗 Simulacija gradnje..."
-          mkdir -p build/Projekat
-          cp Projekat/* build/Projekat/
+          mkdir -p dist
+          cp -r Projekat/* dist/
 
       - name: 🚀 Namestitev aplikacije (samo na main veji)
         if: github.ref == 'refs/heads/main'
