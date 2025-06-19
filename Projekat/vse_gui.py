@@ -162,7 +162,7 @@ class VoiceGUI:
         self.root.geometry("500x500")
         self.root.configure(bg="#f0f0f0")
 
-        self.bg_image = Image.open("background.jpg")  # pot do tvoje gradient slike
+        self.bg_image = Image.open("background.jpg") 
         self.bg_photo = ImageTk.PhotoImage(self.bg_image)
         self.bg_label = tk.Label(root, image=self.bg_photo)
         self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)

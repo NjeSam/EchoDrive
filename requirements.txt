@@ -1,0 +1,19 @@
+# Jedrne knjižnice za ML in avdio
+numpy
+tensorflow
+librosa
+scipy
+scikit-learn
+
+# Grafični uporabniški vmesnik
+Pillow
+
+# API in omrežje
+spotipy
+paho-mqtt
+sounddevice
+
+# Testiranje in pripomočki
+pytest
+tqdm
+matplotlib
