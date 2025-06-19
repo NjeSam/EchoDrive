@@ -2,47 +2,49 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [ main, devel ]
+    branches: [main, devel, feature, release]
   pull_request:
-    branches: [ main, devel ]
+    branches: [main, devel]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-    - name: ✅ Checkout repozitorijuma
-      uses: actions/checkout@v4
+      - name: ✅ Prevzem repozitorija
+        uses: actions/checkout@v4
 
-    - name: 🐍 Postavi Python okruženje
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: 🐍 Nastavitev okolja Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
-    - name: 📦 Instaliraj zavisnosti
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt || true
-        pip install pytest
+      - name: 📦 Namestitev odvisnosti
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: ✅ Proveri sintaksu fajlova
-      run: |
-        python -m py_compile generate_spectrograms.py || true
-        python -m py_compile neuronska_projekat.py || true
+      - name: ✅ Preverjanje sintakse datotek
+        run: |
+          python -m py_compile Projekat/neuronska_projekt.py
+          python -m py_compile Projekat/neuronska_barve.py
+          python -m py_compile Projekat/vse_gui.py
+          python -m py_compile MQTT/sender.py
+          python -m py_compile MQTT/reciever.py
 
-    - name: 🧪 Pokreni unit testove (tests/)
-      run: |
-        pytest tests/ || echo "⚠️ Testovi nisu prošli ili ne postoje"
+      - name: 🧪 Zagon enotnih testov (tests/)
+        run: |
+          pytest tests/ || echo "⚠️ Testi niso uspeli ali ne obstajajo"
 
-    - name: 🛠 Build aplikacije (samo na main)
-      if: github.ref == 'refs/heads/main'
-      run: |
-        echo "🏗 Ovde bi išla komanda za build, npr: python setup.py build"
-        mkdir build
-        cp neuronska_projekat.py build/
+      - name: 🛠 Gradnja aplikacije (samo na main veji)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "🏗 Simulacija gradnje..."
+          mkdir -p build/Projekat
+          cp Projekat/* build/Projekat/
 
-    - name: 🚀 Deploy aplikacije (samo na main)
-      if: github.ref == 'refs/heads/main'
-      run: |
-        echo "🚀 Deploy skripta ovde (npr. SCP, rsync, Docker push...)"
-        echo "📦 Poslato na server ili hosting"
+      - name: 🚀 Namestitev aplikacije (samo na main veji)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "🚀 Simulacija namestitve..."
+          echo "📦 Poslano na strežnik"
