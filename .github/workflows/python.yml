@@ -26,7 +26,7 @@ jobs:
 
       - name: ✅ Preverjanje sintakse datotek
         run: |
-          python -m py_compile Projekat/neuronska_projekt.py
+          python -m py_compile Projekat/neuronska_projekat.py
           python -m py_compile Projekat/neuronska_barve.py
           python -m py_compile Projekat/vse_gui.py
           python -m py_compile MQTT/sender.py
